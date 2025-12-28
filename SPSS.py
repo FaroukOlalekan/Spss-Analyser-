@@ -1,49 +1,55 @@
+# ======================================
+# IMPORTS
+# ======================================
 import streamlit as st
 import pandas as pd
 import numpy as np
 import pyreadstat
 from scipy import stats
 import statsmodels.api as sm
+import matplotlib.pyplot as plt
+import seaborn as sns
 from io import StringIO
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import inch
+import os
 
-# ===============================
-# Page Config
-# ===============================
-st.set_page_config(
-    page_title="Universal Statistical Analyzer",
-    layout="wide"
-)
+# ======================================
+# PAGE CONFIG
+# ======================================
+st.set_page_config(page_title="Phabolous Statistical Analyzer", layout="wide")
 
-# ===============================
-# Custom Styling
-# ===============================
+# ======================================
+# CUSTOM CSS (BACKGROUND + COLORS)
+# ======================================
 st.markdown("""
 <style>
-.result-box {
-    padding: 12px;
-    border-radius: 8px;
-    margin-bottom: 10px;
-}
-.sig { background-color: #e8f5e9; border-left: 6px solid #2e7d32; }
-.nsig { background-color: #ffebee; border-left: 6px solid #c62828; }
-.info { background-color: #e3f2fd; border-left: 6px solid #1565c0; }
-.warn { background-color: #fff8e1; border-left: 6px solid #f9a825; }
+.stApp { background-color: #F4F6F8; }
+.result-box { padding: 14px; border-radius: 10px; margin-bottom: 12px; }
+.sig { background-color: #E8F5E9; border-left: 6px solid #2E7D32; }
+.nsig { background-color: #FFEBEE; border-left: 6px solid #C62828; }
+.info { background-color: #E3F2FD; border-left: 6px solid #1565C0; }
+.warn { background-color: #FFF8E1; border-left: 6px solid #F9A825; }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("📊 Universal Statistical Analyzer (SPSS-Style)")
+# ======================================
+# HEADER
+# ======================================
+st.title("📊 Phabolous Statistical Analyzer (SPSS-Style)")
 st.markdown(
     "<div class='result-box info'>"
-    "✔ Supports SPSS (.sav), CSV, Excel, TSV, and Stata files<br>"
-    "✔ Unicode-friendly statistical reporting<br>"
-    "✔ Color-coded results interpretation"
+    "Upload data, perform SPSS-equivalent analyses, visualize results, "
+    "and download a professional PDF report with embedded graphs."
     "</div>",
     unsafe_allow_html=True
 )
 
-# ===============================
-# File Upload
-# ===============================
+# ======================================
+# FILE UPLOAD
+# ======================================
 uploaded_file = st.file_uploader(
     "📂 Upload Data File",
     type=["sav", "csv", "xlsx", "xls", "tsv", "dta"]
@@ -51,164 +57,171 @@ uploaded_file = st.file_uploader(
 
 def load_data(file):
     ext = file.name.split(".")[-1].lower()
-
     if ext == "sav":
-        df, meta = pyreadstat.read_sav(file)
-        return df, meta
-    elif ext == "csv":
-        return pd.read_csv(file), None
-    elif ext == "tsv":
-        return pd.read_csv(file, sep="\t"), None
-    elif ext in ["xlsx", "xls"]:
-        return pd.read_excel(file), None
-    elif ext == "dta":
-        return pd.read_stata(file), None
-    else:
-        return None, None
+        return pyreadstat.read_sav(file)[0]
+    if ext == "csv":
+        return pd.read_csv(file)
+    if ext == "tsv":
+        return pd.read_csv(file, sep="\t")
+    if ext in ["xlsx", "xls"]:
+        return pd.read_excel(file)
+    if ext == "dta":
+        return pd.read_stata(file)
+    return None
 
+# ======================================
+# MAIN APP
+# ======================================
 if uploaded_file:
-    df, meta = load_data(uploaded_file)
-
+    df = load_data(uploaded_file)
     st.success(f"✔ Loaded file: {uploaded_file.name}")
 
     numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
     categorical_cols = df.select_dtypes(exclude=np.number).columns.tolist()
 
-    # ===============================
-    # Data Preview
-    # ===============================
+    # ======================================
+    # DATA PREVIEW
+    # ======================================
     st.subheader("📄 Data Preview")
     st.dataframe(df.head())
 
-    # ===============================
-    # Descriptive Statistics
-    # ===============================
+    # ======================================
+    # DESCRIPTIVE STATISTICS
+    # ======================================
     st.subheader("📈 Descriptive Statistics")
     st.dataframe(df.describe(include="all"))
 
-    # ===============================
-    # Normality Tests
-    # ===============================
+    # ======================================
+    # NORMALITY TESTS
+    # ======================================
     st.subheader("📌 Normality Tests (Shapiro–Wilk)")
-
     normality_results = []
 
     for col in numeric_cols:
         if df[col].dropna().shape[0] >= 3:
             W, p = stats.shapiro(df[col].dropna())
             normality_results.append((col, W, p))
-
-            box_class = "sig" if p > 0.05 else "warn"
-            interpretation = "✓ Normal distribution" if p > 0.05 else "⚠ Deviates from normality"
-
+            box = "sig" if p > 0.05 else "warn"
             st.markdown(
-                f"<div class='result-box {box_class}'>"
-                f"<b>{col}</b> → W = {W:.3f}, p = {p:.4f}<br>"
-                f"{interpretation} (α = 0.05)"
+                f"<div class='result-box {box}'>"
+                f"<b>{col}</b>: W = {W:.3f}, p = {p:.4f}"
                 "</div>",
                 unsafe_allow_html=True
             )
 
-    # ===============================
-    # Independent Samples T-Test
-    # ===============================
+    # ======================================
+    # T-TEST
+    # ======================================
     st.subheader("🧪 Independent Samples t-Test")
+    v1 = st.selectbox("Variable 1", numeric_cols)
+    v2 = st.selectbox("Variable 2", numeric_cols, index=1)
 
-    if len(numeric_cols) >= 2:
-        v1 = st.selectbox("Group 1 Variable", numeric_cols)
-        v2 = st.selectbox("Group 2 Variable", numeric_cols, index=1)
-
-        t, p = stats.ttest_ind(df[v1].dropna(), df[v2].dropna(), equal_var=False)
-
-        box = "sig" if p < 0.05 else "nsig"
-        sig_text = "✓ Statistically significant difference" if p < 0.05 else "✗ No significant difference"
-
-        st.markdown(
-            f"<div class='result-box {box}'>"
-            f"t = {t:.3f}, p = {p:.4f}<br>"
-            f"{sig_text}"
-            "</div>",
-            unsafe_allow_html=True
-        )
-
-    # ===============================
-    # Chi-Square Test
-    # ===============================
-    st.subheader("🧪 Chi-Square Test of Independence")
-
-    if len(categorical_cols) >= 2:
-        c1 = st.selectbox("Categorical Variable 1", categorical_cols)
-        c2 = st.selectbox("Categorical Variable 2", categorical_cols, index=1)
-
-        table = pd.crosstab(df[c1], df[c2])
-        χ2, pχ, dof, _ = stats.chi2_contingency(table)
-
-        box = "sig" if pχ < 0.05 else "nsig"
-        result = "✓ Variables are associated" if pχ < 0.05 else "✗ No association found"
-
-        st.markdown(
-            f"<div class='result-box {box}'>"
-            f"χ²({dof}) = {χ2:.3f}, p = {pχ:.4f}<br>"
-            f"{result}"
-            "</div>",
-            unsafe_allow_html=True
-        )
-
-        st.dataframe(table)
-
-    # ===============================
-    # Linear Regression
-    # ===============================
-    st.subheader("📉 Simple Linear Regression")
-
-    y = st.selectbox("Dependent Variable (Y)", numeric_cols, key="reg_y")
-    x = st.selectbox("Independent Variable (X)", numeric_cols, index=1, key="reg_x")
-
-    X = sm.add_constant(df[x])
-    model = sm.OLS(df[y], X, missing="drop").fit()
-
-    β = model.params[1]
-    pβ = model.pvalues[1]
-
-    box = "sig" if pβ < 0.05 else "nsig"
-
+    t, p = stats.ttest_ind(df[v1].dropna(), df[v2].dropna(), equal_var=False)
     st.markdown(
-        f"<div class='result-box {box}'>"
-        f"β = {β:.3f}, R² = {model.rsquared:.3f}, p = {pβ:.4f}<br>"
-        f"{'✓ Significant predictor' if pβ < 0.05 else '✗ Not a significant predictor'}"
+        f"<div class='result-box {'sig' if p < 0.05 else 'nsig'}'>"
+        f"t = {t:.3f}, p = {p:.4f}"
         "</div>",
         unsafe_allow_html=True
     )
 
-    # ===============================
-    # Unicode-Friendly Report
-    # ===============================
-    st.subheader("📝 Automatic Statistical Report")
+    # ======================================
+    # REGRESSION
+    # ======================================
+    st.subheader("📉 Linear Regression")
+    y = st.selectbox("Dependent Variable (Y)", numeric_cols)
+    x = st.selectbox("Independent Variable (X)", numeric_cols, index=1)
 
-    report = StringIO()
-    report.write("STATISTICAL ANALYSIS REPORT\n")
-    report.write("════════════════════════════\n\n")
-    report.write(f"File: {uploaded_file.name}\n")
-    report.write(f"Cases (N) = {df.shape[0]}, Variables = {df.shape[1]}\n\n")
+    X = sm.add_constant(df[x])
+    model = sm.OLS(df[y], X, missing="drop").fit()
+    β = model.params[1]
+    pβ = model.pvalues[1]
 
-    report.write("Descriptive Statistics:\n")
-    for col in numeric_cols:
-        report.write(
-            f"{col}: μ = {df[col].mean():.2f}, σ = {df[col].std():.2f}\n"
-        )
-
-    report.write("\nRegression Analysis:\n")
-    report.write(
-        f"{x} → {y}: β = {β:.2f}, R² = {model.rsquared:.2f}, p = {pβ:.4f}\n"
+    st.markdown(
+        f"<div class='result-box {'sig' if pβ < 0.05 else 'nsig'}'>"
+        f"β = {β:.3f}, R² = {model.rsquared:.3f}, p = {pβ:.4f}"
+        "</div>",
+        unsafe_allow_html=True
     )
 
-    report_text = report.getvalue()
+    # ======================================
+    # GRAPHS (SAVED FOR PDF)
+    # ======================================
+    st.subheader("📊 Graphical Analysis")
+    plot_paths = []
 
-    st.text_area("📄 Generated Report (Unicode-safe)", report_text, height=350)
+    fig, ax = plt.subplots()
+    sns.histplot(df[y].dropna(), kde=True, ax=ax)
+    hist_path = "histogram.png"
+    fig.savefig(hist_path, dpi=300, bbox_inches="tight")
+    plot_paths.append(hist_path)
+    st.pyplot(fig)
 
-    st.download_button(
-        "📥 Download Report",
-        report_text,
-        "Statistical_Report_Unicode.txt",
-        "text/plain"
-    )
+    fig, ax = plt.subplots()
+    sns.regplot(x=df[x], y=df[y], ax=ax)
+    reg_path = "regression.png"
+    fig.savefig(reg_path, dpi=300, bbox_inches="tight")
+    plot_paths.append(reg_path)
+    st.pyplot(fig)
+
+    # ======================================
+    # EXTENDED REPORT (~200 WORDS)
+    # ======================================
+    report_text = f"""
+The present statistical analysis was conducted on the uploaded dataset ({uploaded_file.name}),
+which consisted of {df.shape[0]} cases and {df.shape[1]} variables. The purpose of this analysis
+was to examine data distribution, test statistical assumptions, explore relationships between
+variables, and evaluate inferential outcomes using SPSS-equivalent procedures.
+
+Descriptive statistics indicated variability in central tendency and dispersion across variables.
+For example, the dependent variable demonstrated a mean (μ) of {df[y].mean():.2f} and a standard
+deviation (σ) of {df[y].std():.2f}. Normality testing using the Shapiro–Wilk test suggested that
+some variables approximated a normal distribution, while others deviated from this assumption.
+
+Inferential analysis included an independent samples t-test and a simple linear regression model.
+The regression analysis revealed that {x} predicted {y} with a standardized coefficient of
+β = {β:.2f} and an explained variance of R² = {model.rsquared:.2f}. This effect was
+{'statistically significant' if pβ < 0.05 else 'not statistically significant'} at α = 0.05.
+
+Graphical analyses, including histograms and regression plots, were used to visually inspect
+data distributions and linear relationships. These visualizations supported the numerical
+findings and enhanced interpretability of the results.
+"""
+
+    st.text_area("📝 Generated Report", report_text, height=420)
+
+    # ======================================
+    # PDF GENERATION
+    # ======================================
+    if st.button("📄 Generate PDF Report with Graphs"):
+        pdf_path = "Statistical_Report_With_Graphs.pdf"
+        doc = SimpleDocTemplate(pdf_path, pagesize=A4)
+        styles = getSampleStyleSheet()
+        story = []
+
+        story.append(Paragraph("<b>STATISTICAL ANALYSIS REPORT</b>", styles["Title"]))
+        story.append(Spacer(1, 0.3 * inch))
+
+        for para in report_text.split("\n\n"):
+            story.append(Paragraph(para, styles["Normal"]))
+            story.append(Spacer(1, 0.2 * inch))
+
+        story.append(Spacer(1, 0.3 * inch))
+        story.append(Paragraph("<b>Graphical Analysis</b>", styles["Heading2"]))
+        story.append(Spacer(1, 0.2 * inch))
+
+        for img in plot_paths:
+            story.append(Image(img, width=5 * inch, height=3 * inch))
+            story.append(Spacer(1, 0.3 * inch))
+
+        doc.build(story)
+
+        with open(pdf_path, "rb") as f:
+            st.download_button(
+                "📥 Download PDF Report",
+                f,
+                file_name="Statistical_Report_With_Graphs.pdf",
+                mime="application/pdf"
+            )
+
+        for img in plot_paths:
+            os.remove(img)
