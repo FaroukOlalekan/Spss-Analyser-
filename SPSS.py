@@ -26,7 +26,7 @@ st.set_page_config(page_title="Phabolous Statistical Analyzer", layout="wide")
 # ======================================
 st.markdown("""
 <style>
-.stApp { background-color: #F4F6F8; }
+.stApp { background-color: #FFCDD2; }  /* Changed to soft red */
 .result-box { padding: 14px; border-radius: 10px; margin-bottom: 12px; }
 .sig { background-color: #E8F5E9; border-left: 6px solid #2E7D32; }
 .nsig { background-color: #FFEBEE; border-left: 6px solid #C62828; }
@@ -34,6 +34,7 @@ st.markdown("""
 .warn { background-color: #FFF8E1; border-left: 6px solid #F9A825; }
 </style>
 """, unsafe_allow_html=True)
+
 
 # ======================================
 # HEADER
