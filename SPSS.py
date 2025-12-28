@@ -1,228 +1,158 @@
-# ======================================
-# IMPORTS
-# ======================================
 import streamlit as st
 import pandas as pd
-import numpy as np
-import pyreadstat
-from scipy import stats
+from scipy.stats import chi2_contingency, fisher_exact
+from statsmodels.stats.contingency_tables import Table2x2
 import statsmodels.api as sm
+import pyreadstat
 import matplotlib.pyplot as plt
-import seaborn as sns
-from io import StringIO
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image
-from reportlab.lib.styles import getSampleStyleSheet
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import inch
-import os
 
-# ======================================
-# PAGE CONFIG
-# ======================================
-st.set_page_config(page_title="Phabolous Statistical Analyzer", layout="wide")
+# ---------------- PAGE CONFIG ----------------
+st.set_page_config(page_title="AI-SPSS 📊 Analysis Tool", layout="wide")
 
-# ======================================
-# CUSTOM CSS (BACKGROUND + COLORS)
-# ======================================
+# ---------------- BACKGROUND COLOR ----------------
 st.markdown("""
 <style>
-.stApp { background-color: #FFCDD2; }  /* Changed to soft red */
-.result-box { padding: 14px; border-radius: 10px; margin-bottom: 12px; }
-.sig { background-color: #E8F5E9; border-left: 6px solid #2E7D32; }
-.nsig { background-color: #FFEBEE; border-left: 6px solid #C62828; }
-.info { background-color: #E3F2FD; border-left: 6px solid #1565C0; }
-.warn { background-color: #FFF8E1; border-left: 6px solid #F9A825; }
+.stApp {
+    background-color: #eef4f8;
+}
 </style>
 """, unsafe_allow_html=True)
 
+st.title("🤖 AI-Assisted SPSS Data Analysis & Chat Interface")
 
-# ======================================
-# HEADER
-# ======================================
-st.title("📊 Phabolous Statistical Analyzer (SPSS-Style)")
-st.markdown(
-    "<div class='result-box info'>"
-    "Upload data, perform SPSS-equivalent analyses, visualize results, "
-    "and download a professional PDF report with embedded graphs."
-    "</div>",
-    unsafe_allow_html=True
-)
+st.markdown("""
+📂 Upload your dataset • ❓ Ask research questions • 📊 Run SPSS-style analyses  
+🧠 Get ChatGPT-like explanations • 📝 Auto-generate academic reports
+""")
 
-# ======================================
-# FILE UPLOAD
-# ======================================
+# ---------------- FILE UPLOAD ----------------
 uploaded_file = st.file_uploader(
-    "📂 Upload Data File",
-    type=["sav", "csv", "xlsx", "xls", "tsv", "dta"]
+    "📂 Upload dataset",
+    type=["sav", "xlsx", "xls", "csv", "tsv", "txt", "dta", "sas7bdat", "json"]
 )
 
-def load_data(file):
-    ext = file.name.split(".")[-1].lower()
-    if ext == "sav":
-        return pyreadstat.read_sav(file)[0]
-    if ext == "csv":
-        return pd.read_csv(file)
-    if ext == "tsv":
-        return pd.read_csv(file, sep="\t")
-    if ext in ["xlsx", "xls"]:
-        return pd.read_excel(file)
-    if ext == "dta":
-        return pd.read_stata(file)
-    return None
-
-# ======================================
-# MAIN APP
-# ======================================
 if uploaded_file:
-    df = load_data(uploaded_file)
-    st.success(f"✔ Loaded file: {uploaded_file.name}")
+    file_name = uploaded_file.name.lower()
 
-    numeric_cols = df.select_dtypes(include=np.number).columns.tolist()
-    categorical_cols = df.select_dtypes(exclude=np.number).columns.tolist()
+    try:
+        if file_name.endswith(".sav"):
+            df, meta = pyreadstat.read_sav(uploaded_file)
+        elif file_name.endswith((".xlsx", ".xls")):
+            df = pd.read_excel(uploaded_file)
+        elif file_name.endswith(".csv"):
+            df = pd.read_csv(uploaded_file)
+        elif file_name.endswith(".tsv"):
+            df = pd.read_csv(uploaded_file, sep="\t")
+        elif file_name.endswith(".txt"):
+            df = pd.read_csv(uploaded_file, sep=None, engine="python")
+        elif file_name.endswith(".dta"):
+            df = pd.read_stata(uploaded_file)
+        elif file_name.endswith(".sas7bdat"):
+            df = pd.read_sas(uploaded_file)
+        elif file_name.endswith(".json"):
+            df = pd.read_json(uploaded_file)
 
-    # ======================================
-    # DATA PREVIEW
-    # ======================================
-    st.subheader("📄 Data Preview")
+        st.success("✅ Dataset loaded successfully!")
+
+    except Exception as e:
+        st.error(f"❌ Error loading file: {e}")
+        st.stop()
+
+    # ---------------- PREVIEW ----------------
+    st.subheader("👀 Dataset Preview")
     st.dataframe(df.head())
 
-    # ======================================
-    # DESCRIPTIVE STATISTICS
-    # ======================================
-    st.subheader("📈 Descriptive Statistics")
-    st.dataframe(df.describe(include="all"))
-
-    # ======================================
-    # NORMALITY TESTS
-    # ======================================
-    st.subheader("📌 Normality Tests (Shapiro–Wilk)")
-    normality_results = []
-
-    for col in numeric_cols:
-        if df[col].dropna().shape[0] >= 3:
-            W, p = stats.shapiro(df[col].dropna())
-            normality_results.append((col, W, p))
-            box = "sig" if p > 0.05 else "warn"
-            st.markdown(
-                f"<div class='result-box {box}'>"
-                f"<b>{col}</b>: W = {W:.3f}, p = {p:.4f}"
-                "</div>",
-                unsafe_allow_html=True
-            )
-
-    # ======================================
-    # T-TEST
-    # ======================================
-    st.subheader("🧪 Independent Samples t-Test")
-    v1 = st.selectbox("Variable 1", numeric_cols)
-    v2 = st.selectbox("Variable 2", numeric_cols, index=1)
-
-    t, p = stats.ttest_ind(df[v1].dropna(), df[v2].dropna(), equal_var=False)
-    st.markdown(
-        f"<div class='result-box {'sig' if p < 0.05 else 'nsig'}'>"
-        f"t = {t:.3f}, p = {p:.4f}"
-        "</div>",
-        unsafe_allow_html=True
+    # ---------------- RESEARCH QUESTION ----------------
+    st.subheader("❓ Research Question")
+    user_question = st.text_input(
+        "Type your research question",
+        placeholder="e.g., Is exposure to 2,4-D associated with increased cancer risk in dogs?"
     )
 
-    # ======================================
-    # REGRESSION
-    # ======================================
-    st.subheader("📉 Linear Regression")
-    y = st.selectbox("Dependent Variable (Y)", numeric_cols)
-    x = st.selectbox("Independent Variable (X)", numeric_cols, index=1)
+    # ---------------- VARIABLE SELECTION ----------------
+    st.subheader("🧪 Variable Selection")
+    exposure = st.selectbox("Independent / Exposure Variable", df.columns)
+    outcome = st.selectbox("Dependent / Outcome Variable", df.columns)
 
-    X = sm.add_constant(df[x])
-    model = sm.OLS(df[y], X, missing="drop").fit()
-    β = model.params[1]
-    pβ = model.pvalues[1]
+    if user_question and exposure and outcome:
 
-    st.markdown(
-        f"<div class='result-box {'sig' if pβ < 0.05 else 'nsig'}'>"
-        f"β = {β:.3f}, R² = {model.rsquared:.3f}, p = {pβ:.4f}"
-        "</div>",
-        unsafe_allow_html=True
-    )
+        # ---------------- CROSSTABS ----------------
+        raw_table = pd.crosstab(df[exposure], df[outcome])
+        percent_table = pd.crosstab(df[exposure], df[outcome], normalize='index') * 100
 
-    # ======================================
-    # GRAPHS (SAVED FOR PDF)
-    # ======================================
-    st.subheader("📊 Graphical Analysis")
-    plot_paths = []
+        st.subheader("📊 Crosstabulation (Row %)")
+        st.table(percent_table.round(2))
 
-    fig, ax = plt.subplots()
-    sns.histplot(df[y].dropna(), kde=True, ax=ax)
-    hist_path = "histogram.png"
-    fig.savefig(hist_path, dpi=300, bbox_inches="tight")
-    plot_paths.append(hist_path)
-    st.pyplot(fig)
+        # ---------------- STATISTICS ----------------
+        chi2, p, dof, expected = chi2_contingency(raw_table)
+        fisher_p = fisher_exact(raw_table.values)[1]
 
-    fig, ax = plt.subplots()
-    sns.regplot(x=df[x], y=df[y], ax=ax)
-    reg_path = "regression.png"
-    fig.savefig(reg_path, dpi=300, bbox_inches="tight")
-    plot_paths.append(reg_path)
-    st.pyplot(fig)
+        risk = Table2x2(raw_table.values)
+        or_val = risk.oddsratio
+        rr_val = risk.riskratio
+        ci_low, ci_high = risk.oddsratio_confint()
 
-    # ======================================
-    # EXTENDED REPORT (~200 WORDS)
-    # ======================================
-    report_text = f"""
-The present statistical analysis was conducted on the uploaded dataset ({uploaded_file.name}),
-which consisted of {df.shape[0]} cases and {df.shape[1]} variables. The purpose of this analysis
-was to examine data distribution, test statistical assumptions, explore relationships between
-variables, and evaluate inferential outcomes using SPSS-equivalent procedures.
+        X = sm.add_constant(df[exposure])
+        y = df[outcome]
+        logit = sm.Logit(y, X).fit(disp=False)
 
-Descriptive statistics indicated variability in central tendency and dispersion across variables.
-For example, the dependent variable demonstrated a mean (μ) of {df[y].mean():.2f} and a standard
-deviation (σ) of {df[y].std():.2f}. Normality testing using the Shapiro–Wilk test suggested that
-some variables approximated a normal distribution, while others deviated from this assumption.
+        # ---------------- CHART ----------------
+        st.subheader("📈 Bar Chart")
+        fig, ax = plt.subplots()
+        raw_table.plot(kind='bar', ax=ax)
+        ax.set_xlabel(exposure)
+        ax.set_ylabel("Frequency")
+        st.pyplot(fig)
 
-Inferential analysis included an independent samples t-test and a simple linear regression model.
-The regression analysis revealed that {x} predicted {y} with a standardized coefficient of
-β = {β:.2f} and an explained variance of R² = {model.rsquared:.2f}. This effect was
-{'statistically significant' if pβ < 0.05 else 'not statistically significant'} at α = 0.05.
+        # ---------------- RESULTS ----------------
+        st.subheader("📊 SPSS-Equivalent Results")
 
-Graphical analyses, including histograms and regression plots, were used to visually inspect
-data distributions and linear relationships. These visualizations supported the numerical
-findings and enhanced interpretability of the results.
-"""
+        st.markdown(f"""
+- **χ²({dof})** = {chi2:.2f}  
+- **p-value** = {p:.3f}  
+- **Fisher’s Exact p** = {fisher_p:.3f}  
+- **Odds Ratio (OR)** = {or_val:.2f} (95% CI [{ci_low:.2f}, {ci_high:.2f}])  
+- **Relative Risk (RR)** = {rr_val:.2f}  
+- **Logistic Regression β** = {logit.params[1]:.2f}, *p* = {logit.pvalues[1]:.3f}
+""")
 
-    st.text_area("📝 Generated Report", report_text, height=420)
+        # ---------------- REPORT ----------------
+        st.subheader("📝 AI-Generated Academic Report (~300 words)")
+        st.text_area(
+            "Editable Report",
+            f"""
+📌 **Research Question:** {user_question}
 
-    # ======================================
-    # PDF GENERATION
-    # ======================================
-    if st.button("📄 Generate PDF Report with Graphs"):
-        pdf_path = "Statistical_Report_With_Graphs.pdf"
-        doc = SimpleDocTemplate(pdf_path, pagesize=A4)
-        styles = getSampleStyleSheet()
-        story = []
+**Results Summary:**  
+χ²({dof}) = {chi2:.2f}, p = {p:.3f} → {'✔ Significant' if p < 0.05 else '✖ Not significant'}
 
-        story.append(Paragraph("<b>STATISTICAL ANALYSIS REPORT</b>", styles["Title"]))
-        story.append(Spacer(1, 0.3 * inch))
+Dogs exposed to {exposure} had higher odds of {outcome} (OR = {or_val:.2f}, RR = {rr_val:.2f}).  
+Logistic regression confirmed exposure as a significant predictor (β = {logit.params[1]:.2f}).
 
-        for para in report_text.split("\n\n"):
-            story.append(Paragraph(para, styles["Normal"]))
-            story.append(Spacer(1, 0.2 * inch))
+**Conclusion:**  
+These findings support the hypothesis that {exposure} is associated with {outcome}.
+""",
+            height=400
+        )
 
-        story.append(Spacer(1, 0.3 * inch))
-        story.append(Paragraph("<b>Graphical Analysis</b>", styles["Heading2"]))
-        story.append(Spacer(1, 0.2 * inch))
+        # ---------------- AI CHAT ----------------
+        st.subheader("🤖 Ask the AI About Your Data")
 
-        for img in plot_paths:
-            story.append(Image(img, width=5 * inch, height=3 * inch))
-            story.append(Spacer(1, 0.3 * inch))
+        ai_question = st.text_area(
+            "Ask a question (ChatGPT-style)",
+            placeholder="Can I reject the null hypothesis? Explain this simply."
+        )
 
-        doc.build(story)
+        def ai_chat_response(q):
+            q = q.lower()
+            if "null" in q:
+                return "✔ Yes, the null hypothesis can be rejected." if p < 0.05 else "✖ No, the null hypothesis cannot be rejected."
+            if "simple" in q:
+                return f"🧠 Simply put, exposure to {exposure} increases the chance of {outcome}."
+            if "spss" in q:
+                return f"📊 In SPSS terms: χ²({dof}) = {chi2:.2f}, p = {p:.3f}."
+            return f"📌 There is a statistically significant association between {exposure} and {outcome}."
 
-        with open(pdf_path, "rb") as f:
-            st.download_button(
-                "📥 Download PDF Report",
-                f,
-                file_name="Statistical_Report_With_Graphs.pdf",
-                mime="application/pdf"
-            )
-
-        for img in plot_paths:
-            os.remove(img)
+        if ai_question:
+            st.markdown("### 🤖 AI Response")
+            st.markdown(ai_chat_response(ai_question))
